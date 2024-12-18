@@ -1,7 +1,7 @@
 //go:build windows
 // +build windows
 
-package main
+package sniffer
 
 import (
 	"path/filepath"
