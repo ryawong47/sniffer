@@ -1,4 +1,4 @@
-module github.com/chenjiandongx/sniffer
+module github.com/jeffreynn/sniffer
 
 go 1.15
 
