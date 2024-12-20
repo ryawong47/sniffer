@@ -65,7 +65,7 @@ type Sniffer struct {
 	DnsResolver   *DNSResolver
 	PcapClient    *PcapClient
 	StatsManager  *StatsManager
-	ui            *UIComponent
+	Ui            *UIComponent
 	SocketFetcher SocketFetcher
 }
 
@@ -81,7 +81,7 @@ func NewSniffer(opts Options) (*Sniffer, error) {
 		DnsResolver:   dnsResolver,
 		PcapClient:    pcapClient,
 		StatsManager:  NewStatsManager(opts),
-		ui:            NewUIComponent(opts),
+		Ui:            NewUIComponent(opts),
 		SocketFetcher: GetSocketFetcher(),
 	}, nil
 }
@@ -90,8 +90,8 @@ func (s *Sniffer) SwitchViewMode() {
 	s.Opts.ViewMode = (s.Opts.ViewMode + 1) % 3
 	s.StatsManager = NewStatsManager(s.Opts)
 
-	s.ui.Close()
-	s.ui = NewUIComponent(s.Opts)
+	s.Ui.Close()
+	s.Ui = NewUIComponent(s.Opts)
 }
 
 func (s *Sniffer) Start() {
@@ -107,12 +107,12 @@ func (s *Sniffer) Start() {
 		case e := <-events:
 			switch e.ID {
 			case "<Tab>":
-				s.ui.viewer.Shift()
+				s.Ui.viewer.Shift()
 			case "<Space>":
 				paused = !paused
 			case "<Resize>":
 				payload := e.Payload.(termui.Resize)
-				s.ui.viewer.Resize(payload.Width, payload.Height)
+				s.Ui.viewer.Resize(payload.Width, payload.Height)
 			case "s", "S":
 				s.SwitchViewMode()
 			case "q", "Q", "<C-c>":
@@ -128,7 +128,7 @@ func (s *Sniffer) Start() {
 }
 
 func (s *Sniffer) Close() {
-	s.ui.Close()
+	s.Ui.Close()
 	s.PcapClient.Close()
 	s.DnsResolver.Close()
 }
@@ -141,5 +141,5 @@ func (s *Sniffer) Refresh() {
 	}
 
 	s.StatsManager.Put(Stat{OpenSockets: openSockets, Utilization: utilization})
-	s.ui.viewer.Render(s.StatsManager.GetStats())
+	s.Ui.viewer.Render(s.StatsManager.GetStats())
 }
