@@ -21,7 +21,7 @@ type PcapClient struct {
 	bindIPs           map[string]bool
 	handlers          []*pcapHandler
 	bpfFilter         string
-	sinker            *Sinker
+	Sinker            *Sinker
 	devicesPrefix     []string
 	disableDNSResolve bool
 	allDevices        bool
@@ -33,7 +33,7 @@ func NewPcapClient(lookup Lookup, opt Options) (*PcapClient, error) {
 	client := &PcapClient{
 		bindIPs:           make(map[string]bool),
 		handlers:          make([]*pcapHandler, 0),
-		sinker:            NewSinker(),
+		Sinker:            NewSinker(),
 		lookup:            lookup,
 		bpfFilter:         opt.BPFFilter,
 		devicesPrefix:     opt.DevicesPrefix,
@@ -192,7 +192,7 @@ func (c *PcapClient) listen(ph *pcapHandler) {
 			if seg == nil {
 				continue
 			}
-			c.sinker.Fetch(*seg)
+			c.Sinker.Fetch(*seg)
 		}
 	}
 }

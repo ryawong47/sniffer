@@ -61,12 +61,12 @@ func DefaultOptions() Options {
 }
 
 type Sniffer struct {
-	opts          Options
-	dnsResolver   *DNSResolver
-	pcapClient    *PcapClient
-	statsManager  *StatsManager
+	Opts          Options
+	DnsResolver   *DNSResolver
+	PcapClient    *PcapClient
+	StatsManager  *StatsManager
 	ui            *UIComponent
-	socketFetcher SocketFetcher
+	SocketFetcher SocketFetcher
 }
 
 func NewSniffer(opts Options) (*Sniffer, error) {
@@ -77,21 +77,21 @@ func NewSniffer(opts Options) (*Sniffer, error) {
 	}
 
 	return &Sniffer{
-		opts:          opts,
-		dnsResolver:   dnsResolver,
-		pcapClient:    pcapClient,
-		statsManager:  NewStatsManager(opts),
+		Opts:          opts,
+		DnsResolver:   dnsResolver,
+		PcapClient:    pcapClient,
+		StatsManager:  NewStatsManager(opts),
 		ui:            NewUIComponent(opts),
-		socketFetcher: GetSocketFetcher(),
+		SocketFetcher: GetSocketFetcher(),
 	}, nil
 }
 
 func (s *Sniffer) SwitchViewMode() {
-	s.opts.ViewMode = (s.opts.ViewMode + 1) % 3
-	s.statsManager = NewStatsManager(s.opts)
+	s.Opts.ViewMode = (s.Opts.ViewMode + 1) % 3
+	s.StatsManager = NewStatsManager(s.Opts)
 
 	s.ui.Close()
-	s.ui = NewUIComponent(s.opts)
+	s.ui = NewUIComponent(s.Opts)
 }
 
 func (s *Sniffer) Start() {
@@ -99,7 +99,7 @@ func (s *Sniffer) Start() {
 	s.Refresh()
 	var paused bool
 
-	ticker := time.NewTicker(time.Duration(s.opts.Interval) * time.Second)
+	ticker := time.NewTicker(time.Duration(s.Opts.Interval) * time.Second)
 	defer ticker.Stop()
 
 	for {
@@ -129,17 +129,17 @@ func (s *Sniffer) Start() {
 
 func (s *Sniffer) Close() {
 	s.ui.Close()
-	s.pcapClient.Close()
-	s.dnsResolver.Close()
+	s.PcapClient.Close()
+	s.DnsResolver.Close()
 }
 
 func (s *Sniffer) Refresh() {
-	utilization := s.pcapClient.sinker.GetUtilization()
-	openSockets, err := s.socketFetcher.GetOpenSockets()
+	utilization := s.PcapClient.Sinker.GetUtilization()
+	openSockets, err := s.SocketFetcher.GetOpenSockets()
 	if err != nil {
 		return
 	}
 
-	s.statsManager.Put(Stat{OpenSockets: openSockets, Utilization: utilization})
-	s.ui.viewer.Render(s.statsManager.GetStats())
+	s.StatsManager.Put(Stat{OpenSockets: openSockets, Utilization: utilization})
+	s.ui.viewer.Render(s.StatsManager.GetStats())
 }
