@@ -215,7 +215,7 @@ func (nl *netlinkConn) sockdiagSend(proto, family uint8, states uint32) (skfd in
 	return skfd, nil
 }
 
-func (nl *netlinkConn) sockdiagRecv(skfd, proto int, inodeMap map[uint32]string) (OpenSockets, error) {
+func (nl *netlinkConn) sockdiagRecv(skfd, proto int, inodeMap map[uint32]ProcessInfo) (OpenSockets, error) {
 	sockets := make(OpenSockets)
 	buffer := make([]byte, os.Getpagesize())
 loop:
@@ -242,10 +242,7 @@ loop:
 			m := (*inetDiagMsg)(unsafe.Pointer(&msg.Data[0]))
 			srcIP, _ := nl.ipHex2String(m.IDiagFamily, m.ID.IdiagSrc)
 
-			procInfo := ProcessInfo{
-				Pid:  int(msg.Header.Pid),
-				Name: inodeMap[m.IDiagInode],
-			}
+			procInfo := inodeMap[m.IDiagInode]
 
 			var p Protocol
 			switch proto {
@@ -261,7 +258,7 @@ loop:
 	return sockets, nil
 }
 
-func (nl *netlinkConn) getOpenSockets(inodeMap map[uint32]string) (OpenSockets, error) {
+func (nl *netlinkConn) getOpenSockets(inodeMap map[uint32]ProcessInfo) (OpenSockets, error) {
 	sockets := make(OpenSockets)
 
 	type Req struct {
@@ -305,8 +302,8 @@ func (nl *netlinkConn) getOpenSockets(inodeMap map[uint32]string) (OpenSockets, 
 	return sockets, nil
 }
 
-func (nl *netlinkConn) getAllProcsInodes(pids ...int32) map[uint32]string {
-	inode2Procs := make(map[uint32]string)
+func (nl *netlinkConn) getAllProcsInodes(pids ...int32) map[uint32]ProcessInfo {
+	inode2Procs := make(map[uint32]ProcessInfo)
 	for _, pid := range pids {
 		procName, inodes, err := nl.getProcInodes(pid)
 		if err != nil {
@@ -314,7 +311,10 @@ func (nl *netlinkConn) getAllProcsInodes(pids ...int32) map[uint32]string {
 		}
 
 		for _, inode := range inodes {
-			inode2Procs[inode] = procName
+			inode2Procs[inode] = ProcessInfo{
+				Name: procName,
+				Pid:  int(pid),
+			}
 		}
 	}
 	return inode2Procs
