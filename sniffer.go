@@ -140,6 +140,6 @@ func (s *Sniffer) Refresh() {
 		return
 	}
 
-	s.StatsManager.Put(Stat{OpenSockets: openSockets, Utilization: utilization})
+	s.StatsManager.Put(Stat{OpenSockets: openSockets, Utilization: utilization, SocketFetcher: s.SocketFetcher})
 	s.Ui.viewer.Render(s.StatsManager.GetStats())
 }

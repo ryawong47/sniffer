@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 	"unsafe"
@@ -153,7 +154,18 @@ type inetDiagRequest struct {
 	ReqDiag inetDiagReqV2
 }
 
-type netlinkConn struct{}
+type processCache struct {
+	info      ProcessInfo
+	timestamp time.Time
+}
+
+type netlinkConn struct {
+	cacheMutex sync.RWMutex
+	// Cache inode to process mapping for 5 seconds
+	inodeCache map[uint32]processCache
+	// Cache port to process mapping for fallback
+	portCache map[uint16]processCache
+}
 
 // ipv4 be32 to string
 func (nl *netlinkConn) ipv4(b be32) string {
@@ -251,7 +263,18 @@ loop:
 			case syscall.IPPROTO_UDP:
 				p = ProtoUDP
 			}
-			sockets[LocalSocket{IP: srcIP, Port: uint16(m.ID.IdiagSport.Int()), Protocol: p}] = procInfo
+			port := uint16(m.ID.IdiagSport.Int())
+			sockets[LocalSocket{IP: srcIP, Port: port, Protocol: p}] = procInfo
+
+			// Also cache by port for fallback matching
+			if procInfo.Name != "" && procInfo.Name != unknownProcessName {
+				nl.cacheMutex.Lock()
+				nl.portCache[port] = processCache{
+					info:      procInfo,
+					timestamp: time.Now(),
+				}
+				nl.cacheMutex.Unlock()
+			}
 		}
 	}
 
@@ -267,11 +290,22 @@ func (nl *netlinkConn) getOpenSockets(inodeMap map[uint32]ProcessInfo) (OpenSock
 		State    uint32
 	}
 
+	// Check if IPv6 is available to avoid unnecessary queries
+	hasIPv6 := true
+	if _, err := os.Stat("/proc/net/if_inet6"); os.IsNotExist(err) {
+		hasIPv6 = false
+	}
+
 	reqs := []Req{
 		{syscall.IPPROTO_TCP, syscall.AF_INET, uint32(1 | 1<<tcpEstablished)},
-		{syscall.IPPROTO_TCP, syscall.AF_INET6, uint32(1 | 1<<tcpEstablished)},
 		{syscall.IPPROTO_UDP, syscall.AF_INET, uint32(1 << udpConnection)},
-		{syscall.IPPROTO_UDP, syscall.AF_INET6, uint32(1 << udpConnection)},
+	}
+
+	if hasIPv6 {
+		reqs = append(reqs,
+			Req{syscall.IPPROTO_TCP, syscall.AF_INET6, uint32(1 | 1<<tcpEstablished)},
+			Req{syscall.IPPROTO_UDP, syscall.AF_INET6, uint32(1 << udpConnection)},
+		)
 	}
 
 	type Fd struct {
@@ -304,31 +338,134 @@ func (nl *netlinkConn) getOpenSockets(inodeMap map[uint32]ProcessInfo) (OpenSock
 
 func (nl *netlinkConn) getAllProcsInodes(pids ...int32) map[uint32]ProcessInfo {
 	inode2Procs := make(map[uint32]ProcessInfo)
-	for _, pid := range pids {
-		procName, inodes, err := nl.getProcInodes(pid)
-		if err != nil {
-			continue
-		}
+	now := time.Now()
+	cacheTimeout := 5 * time.Second
 
-		for _, inode := range inodes {
-			inode2Procs[inode] = ProcessInfo{
-				Name: procName,
-				Pid:  int(pid),
-			}
+	// First, add cached entries that are still valid
+	nl.cacheMutex.RLock()
+	for inode, cached := range nl.inodeCache {
+		if now.Sub(cached.timestamp) < cacheTimeout {
+			inode2Procs[inode] = cached.info
 		}
 	}
+	nl.cacheMutex.RUnlock()
+
+	// Process PIDs in parallel for better performance
+	type result struct {
+		procInfo ProcessInfo
+		inodes   []uint32
+	}
+
+	// Use a worker pool to limit concurrent /proc access
+	numWorkers := 10
+	if len(pids) < numWorkers {
+		numWorkers = len(pids)
+	}
+
+	pidChan := make(chan int32, len(pids))
+	resultChan := make(chan result, len(pids))
+
+	// Start workers
+	var wg sync.WaitGroup
+	for i := 0; i < numWorkers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for pid := range pidChan {
+				procName, inodes, err := nl.getProcInodes(pid)
+				if err != nil {
+					continue
+				}
+				resultChan <- result{
+					procInfo: ProcessInfo{
+						Name: procName,
+						Pid:  int(pid),
+					},
+					inodes: inodes,
+				}
+			}
+		}()
+	}
+
+	// Send pids to workers
+	for _, pid := range pids {
+		pidChan <- pid
+	}
+	close(pidChan)
+
+	// Wait for workers to finish
+	go func() {
+		wg.Wait()
+		close(resultChan)
+	}()
+
+	// Collect results
+	for res := range resultChan {
+		for _, inode := range res.inodes {
+			inode2Procs[inode] = res.procInfo
+
+			// Update cache
+			nl.cacheMutex.Lock()
+			nl.inodeCache[inode] = processCache{
+				info:      res.procInfo,
+				timestamp: now,
+			}
+			nl.cacheMutex.Unlock()
+		}
+	}
+
+	// Clean up old cache entries
+	nl.cacheMutex.Lock()
+	for inode, cached := range nl.inodeCache {
+		if now.Sub(cached.timestamp) >= cacheTimeout {
+			delete(nl.inodeCache, inode)
+		}
+	}
+	nl.cacheMutex.Unlock()
+
 	return inode2Procs
 }
 
 func (nl *netlinkConn) getProcInodes(pid int32) (string, []uint32, error) {
 	var inodeFds []uint32
-	procName, err := os.Readlink(fmt.Sprintf("/proc/%d/exe", pid))
-	if err != nil {
-		return procName, inodeFds, err
+	procName := ""
+
+	// Try to get process name from exe symlink
+	exePath, err := os.Readlink(fmt.Sprintf("/proc/%d/exe", pid))
+	if err == nil {
+		procName = filepath.Base(exePath)
+	} else {
+		// Fallback: try to get name from cmdline
+		cmdline, err := os.ReadFile(fmt.Sprintf("/proc/%d/cmdline", pid))
+		if err == nil && len(cmdline) > 0 {
+			// cmdline is null-separated, get first part
+			parts := strings.Split(string(cmdline), "\x00")
+			if len(parts) > 0 && parts[0] != "" {
+				procName = filepath.Base(parts[0])
+			}
+		}
+
+		// Last fallback: try comm
+		if procName == "" {
+			comm, err := os.ReadFile(fmt.Sprintf("/proc/%d/comm", pid))
+			if err == nil {
+				procName = strings.TrimSpace(string(comm))
+			}
+		}
+	}
+
+	// If we still don't have a name, skip this process
+	if procName == "" {
+		return "", inodeFds, fmt.Errorf("unable to get process name for pid %d", pid)
 	}
 
 	f, err := os.Open(fmt.Sprintf("/proc/%d/fd", pid))
 	if err != nil {
+		// Permission denied is common for other users' processes
+		if os.IsPermission(err) {
+			// Return what we have so far
+			return procName, inodeFds, nil
+		}
 		return procName, inodeFds, err
 	}
 	defer f.Close()
@@ -354,7 +491,7 @@ func (nl *netlinkConn) getProcInodes(pid int32) (string, []uint32, error) {
 		}
 		inodeFds = append(inodeFds, uint32(inodeInt))
 	}
-	return filepath.Base(procName), inodeFds, nil
+	return procName, inodeFds, nil
 }
 
 func (nl *netlinkConn) listPids() ([]int32, error) {
@@ -392,5 +529,8 @@ func (nl *netlinkConn) GetOpenSockets() (OpenSockets, error) {
 }
 
 func GetSocketFetcher() SocketFetcher {
-	return &netlinkConn{}
+	return &netlinkConn{
+		inodeCache: make(map[uint32]processCache),
+		portCache:  make(map[uint16]processCache),
+	}
 }

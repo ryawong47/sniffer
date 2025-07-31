@@ -1,0 +1,17 @@
+version: '3.8'
+
+services:
+  sniffer:
+    build: .
+    container_name: network-sniffer
+    network_mode: host
+    cap_add:
+      - NET_RAW
+      - NET_ADMIN
+    privileged: true
+    pid: "host"
+    volumes:
+      - /proc:/host/proc:ro
+    environment:
+      - HOST_PROC=/host/proc
+    restart: unless-stopped

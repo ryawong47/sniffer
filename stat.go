@@ -9,8 +9,9 @@ const (
 )
 
 type Stat struct {
-	OpenSockets OpenSockets
-	Utilization Utilization
+	OpenSockets   OpenSockets
+	Utilization   Utilization
+	SocketFetcher SocketFetcher
 }
 
 type ConnectionData struct {
@@ -167,6 +168,13 @@ func (s *StatsManager) getProcName(openSockets OpenSockets, localSocket LocalSoc
 			return v.String()
 		}
 	}
+
+	// Fallback: check if we have cached process info for this port
+	// This helps with short-lived connections or permission issues
+	if fallbackName := s.getProcNameFallback(localSocket); fallbackName != "" {
+		return fallbackName
+	}
+
 	return unknownProcessName
 }
 
