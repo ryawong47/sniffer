@@ -29,7 +29,7 @@ type PcapClient struct {
 	lookup            Lookup
 }
 
-func NewPcapClient(lookup Lookup, opt Options) (*PcapClient, error) {
+func NewPcapClient(lookup Lookup, opt Options, processMonitor interface{}) (*PcapClient, error) {
 	client := &PcapClient{
 		bindIPs:           make(map[string]bool),
 		handlers:          make([]*pcapHandler, 0),

@@ -62,6 +62,7 @@ type ConnectionInfo struct {
 	DownloadPackets int
 	UploadBytes     int
 	DownloadBytes   int
+	Process         *ProcessInfo // Process info if known
 }
 
 type Segment struct {
@@ -69,6 +70,7 @@ type Segment struct {
 	DataLen    int
 	Connection Connection
 	Direction  Direction
+	Process    *ProcessInfo // Process info if known, nil otherwise
 }
 
 type Sinker struct {
@@ -87,6 +89,7 @@ func (c *Sinker) Fetch(seg Segment) {
 	if _, ok := c.utilization[seg.Connection]; !ok {
 		c.utilization[seg.Connection] = &ConnectionInfo{
 			Interface: seg.Interface,
+			Process:   seg.Process,
 		}
 	}
 

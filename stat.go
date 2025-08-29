@@ -156,6 +156,8 @@ func (s *StatsManager) Put(stat Stat) {
 	s.stat = stat
 }
 
+// getProcName is deprecated - process info now comes directly from Segment
+// Kept for backward compatibility with non-Linux systems
 func (s *StatsManager) getProcName(openSockets OpenSockets, localSocket LocalSocket) string {
 	ips := []string{localSocket.IP, "*"}
 	for _, ip := range ips {
@@ -183,9 +185,13 @@ func (s *StatsManager) getNetworkData() *NetworkData {
 
 	stat := s.stat
 	for conn, info := range stat.Utilization {
-		procName := s.getProcName(stat.OpenSockets, conn.Local)
-		if procName == unknownProcessName {
-			continue
+		// For Linux: skip if process info is not available
+		if info.Process == nil {
+			// For non-Linux: fallback to getProcName
+			procName := s.getProcName(stat.OpenSockets, conn.Local)
+			if procName == unknownProcessName {
+				continue // Skip unknown processes
+			}
 		}
 
 		if !visited[conn] {
@@ -217,7 +223,18 @@ func (s *StatsManager) getSnapshot() *Snapshot {
 
 	stat := s.stat
 	for conn, info := range stat.Utilization {
-		procName := s.getProcName(stat.OpenSockets, conn.Local)
+		var procName string
+		// For Linux: use embedded process info
+		if info.Process != nil {
+			procName = info.Process.String()
+		} else {
+			// For non-Linux: fallback to getProcName
+			procName = s.getProcName(stat.OpenSockets, conn.Local)
+			if procName == unknownProcessName {
+				continue // Skip unknown processes
+			}
+		}
+		
 		if _, ok := connections[conn]; !ok {
 			connections[conn] = &ConnectionData{
 				InterfaceName: info.Interface,

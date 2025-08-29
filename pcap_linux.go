@@ -33,9 +33,10 @@ type PcapClient struct {
 	allDevices        bool
 	wg                sync.WaitGroup
 	lookup            Lookup
+	processMonitor    *ProcessMonitor
 }
 
-func NewPcapClient(lookup Lookup, opt Options) (*PcapClient, error) {
+func NewPcapClient(lookup Lookup, opt Options, processMonitor *ProcessMonitor) (*PcapClient, error) {
 	client := &PcapClient{
 		bindIPs:           make(map[string]bool),
 		Sinker:            NewSinker(),
@@ -44,6 +45,7 @@ func NewPcapClient(lookup Lookup, opt Options) (*PcapClient, error) {
 		devicesPrefix:     opt.DevicesPrefix,
 		disableDNSResolve: opt.DisableDNSResolve,
 		allDevices:        opt.AllDevices,
+		processMonitor:    processMonitor,
 	}
 
 	client.ctx, client.cancel = context.WithCancel(context.Background())
@@ -167,6 +169,10 @@ func (c *PcapClient) parsePacket(ph *pcapHandler, decoded []gopacket.Layer) *Seg
 			Local:  LocalSocket{IP: srcIP, Port: srcPort, Protocol: protocol},
 			Remote: RemoteSocket{IP: remoteIP, Port: dstPort},
 		}
+		// Lookup process info immediately
+		if c.processMonitor != nil {
+			seg.Process = c.processMonitor.GetProcess(seg.Connection.Local)
+		}
 
 	case DirectionDownload:
 		remoteIP = srcIP
@@ -176,6 +182,10 @@ func (c *PcapClient) parsePacket(ph *pcapHandler, decoded []gopacket.Layer) *Seg
 		seg.Connection = Connection{
 			Local:  LocalSocket{IP: dstIP, Port: dstPort, Protocol: protocol},
 			Remote: RemoteSocket{IP: remoteIP, Port: srcPort},
+		}
+		// Lookup process info immediately
+		if c.processMonitor != nil {
+			seg.Process = c.processMonitor.GetProcess(seg.Connection.Local)
 		}
 	}
 

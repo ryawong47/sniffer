@@ -1,3 +1,6 @@
+//go:build !linux
+// +build !linux
+
 package sniffer
 
 import (
@@ -71,7 +74,7 @@ type Sniffer struct {
 
 func NewSniffer(opts Options) (*Sniffer, error) {
 	dnsResolver := NewDnsResolver()
-	pcapClient, err := NewPcapClient(dnsResolver.Lookup, opts)
+	pcapClient, err := NewPcapClient(dnsResolver.Lookup, opts, nil)
 	if err != nil {
 		return nil, err
 	}
